@@ -46,7 +46,7 @@ This creates a unique market position where the worthless becomes invaluable - y
 ### Core Technical Stack
 - **Language:** Python (for rapid prototyping with LLM integration)
 - **Scraping:** requests + BeautifulSoup or `praw` for Reddit
-- **NLP Pipeline:** OpenAI/Claude API for contextual inference
+- **NLP Pipeline:** Multi-provider LLM (Google Gemini / Groq / OpenRouter) for contextual inference
 - **Data Validation:** Pydantic schemas for analysis outputs
 - **Storage:** JSON structured data + Markdown summaries
 - **Interface:** Command-line tool for URL input → contextual report

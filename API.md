@@ -66,7 +66,8 @@ Response:
       "discussionPatterns": [...]
     },
     "metadata": {
-      "modelUsed": "gpt-4o",
+      "provider": "gemini",
+      "modelUsed": "gemini-2.0-flash",
       "processingTimeMs": 2340,
       "confidence": 87.5
     }

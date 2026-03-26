@@ -1,8 +1,10 @@
+import 'dotenv/config';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { dbService } from './db';
 import type { Agent } from './db';
 import { v4 as uuidv4 } from 'uuid';
+import { callLLM, getProviderInfo } from './llm';
 
 type Variables = {
   agent: Agent;
@@ -10,7 +12,10 @@ type Variables = {
 
 const app = new Hono<{ Variables: Variables }>();
 
-app.get('/', (c) => c.text('Chronoscribe API is Live'));
+app.get('/', (c) => {
+  const { provider, model } = getProviderInfo();
+  return c.text(`Chronoscribe API is Live — powered by ${provider} (${model})`);
+});
 
 // --- Middleware: Credit Validation ---
 const creditMiddleware = async (c: any, next: any) => {
@@ -79,7 +84,27 @@ app.get('/api/v1/credits/plans', (c) => {
   });
 });
 
-// 3. Core Analysis (Protected)
+// --- Analysis Prompt ---
+const ANALYSIS_SYSTEM_PROMPT = `You are Chronoscribe, an expert cultural analyst for digital communities. 
+You extract contextual metadata including jargon, sentiment, and cultural zeitgeist from community descriptions.
+
+You MUST respond with valid JSON matching this exact schema:
+{
+  "jargon": [
+    { "term": "string", "definition": "string", "sentiment": "string" }
+  ],
+  "culturalZeitgeist": {
+    "mood": "string",
+    "prevailingTopics": ["string"],
+    "emergingTrends": ["string"]
+  },
+  "confidence": number (0-100)
+}
+
+Provide 3-5 jargon terms, 2-4 prevailing topics, and 2-3 emerging trends.
+Base your analysis on your knowledge of the given community.`;
+
+// 3. Core Analysis (Protected) — Now powered by LLM
 app.post('/api/v1/analysis/analyze', creditMiddleware, async (c) => {
   const agent = c.get('agent') as Agent;
   const body = await c.req.json();
@@ -92,28 +117,57 @@ app.post('/api/v1/analysis/analyze', creditMiddleware, async (c) => {
   // Deduct credits (Cost: 5)
   dbService.deductCredits(agent.id, 5);
 
-  // Mock Analysis Result
-  const mockResult = {
-    reportId: `rep_${uuidv4()}`,
-    source: { platform, community: identifier },
-    analysis: {
-      jargon: [
-        { term: "HODL", definition: "Hold On for Dear Life - community commitment to holding assets.", sentiment: "Resilient" }
-      ],
-      culturalZeitgeist: {
-        mood: "Cautiously Optimistic",
-        prevailingTopics: ["Protocol evolution", "Market stability"],
-        emergingTrends: ["AI-to-AI interaction protocols"]
+  const startTime = Date.now();
+  const { provider, model } = getProviderInfo();
+
+  try {
+    const userMessage = `Analyze the "${identifier}" community on ${platform}. Provide jargon, cultural zeitgeist, and confidence score.`;
+
+    const llmResponse = await callLLM(ANALYSIS_SYSTEM_PROMPT, userMessage);
+
+    let analysis: any;
+    try {
+      analysis = JSON.parse(llmResponse);
+    } catch {
+      // If the LLM returns markdown-wrapped JSON, extract it
+      const jsonMatch = llmResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[1].trim());
+      } else {
+        throw new Error('Failed to parse LLM response as JSON');
+      }
+    }
+
+    const processingTimeMs = Date.now() - startTime;
+
+    const result = {
+      reportId: `rep_${uuidv4()}`,
+      source: { platform, community: identifier },
+      analysis,
+      metadata: {
+        provider,
+        modelUsed: model,
+        processingTimeMs,
       },
-      confidence: 94.2
-    },
-    generatedAt: new Date().toISOString(),
-    remainingCredits: agent.credits - 5
-  };
+      generatedAt: new Date().toISOString(),
+      remainingCredits: agent.credits - 5,
+    };
 
-  dbService.recordAnalysis(agent.id, platform, identifier, JSON.stringify(mockResult), 5);
+    dbService.recordAnalysis(agent.id, platform, identifier, JSON.stringify(result), 5);
 
-  return c.json({ success: true, data: mockResult });
+    return c.json({ success: true, data: result });
+  } catch (error: any) {
+    // Refund credits on LLM failure
+    dbService.renewCredits(agent.id, 5);
+
+    return c.json({
+      error: 'Analysis failed',
+      message: error.message || 'LLM inference error',
+      provider,
+      model,
+      remainingCredits: agent.credits, // credits refunded
+    }, 502);
+  }
 });
 
 // 4. Agent Status
@@ -122,10 +176,20 @@ app.get('/api/v1/agents/me', creditMiddleware, (c) => {
   return c.json({ success: true, data: agent });
 });
 
-const port = 3001;
-console.log(`Chronoscribe Agentic MVP running on port ${port}`);
+// 5. Provider Info
+app.get('/api/v1/provider', (c) => {
+  const info = getProviderInfo();
+  return c.json({ success: true, data: info });
+});
+
+const port = Number(process.env.PORT) || 3001;
+const host = process.env.HOST || '0.0.0.0';
+const { provider, model } = getProviderInfo();
+console.log(`🕰️  Chronoscribe Agentic MVP running on http://${host}:${port}`);
+console.log(`🤖 LLM Provider: ${provider} | Model: ${model}`);
 
 serve({
   fetch: app.fetch,
-  port
+  port,
+  hostname: host,
 });
