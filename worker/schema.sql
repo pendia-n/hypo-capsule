@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  api_key TEXT UNIQUE NOT NULL,
+  name TEXT,
+  tier TEXT DEFAULT 'GUEST',
+  credits INTEGER DEFAULT 50,
+  last_renewal DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS analyses (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT,
+  platform TEXT,
+  identifier TEXT,
+  result TEXT,
+  cost INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (agent_id) REFERENCES agents(id)
+);
